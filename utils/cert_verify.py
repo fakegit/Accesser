@@ -1,4 +1,4 @@
-from ssl import CertificateError, _inet_paton, _dnsname_match
+from ssl import CertificateError, _inet_paton, _dnsname_match, _ipaddress_match
 
 def match_hostname(cert, hostname):
     """based on ssl.py in python3.11
