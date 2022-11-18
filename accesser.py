@@ -43,8 +43,6 @@ import urllib.error
 
 _MAXLINE = 65536
 
-REDIRECT_HEADER = 'HTTP/1.1 301 Moved Permanently\r\nLocation: https://{}\r\n\r\n'
-
 class ProxyHandler(StreamRequestHandler):
     raw_request = b''
     remote_ip = None
@@ -65,6 +63,13 @@ class ProxyHandler(StreamRequestHandler):
     def send_error(self, code, message=None, explain=None):
         #TODO
         pass
+
+    def send_pac(self):
+        with open('pac' if os.path.exists('pac') else os.path.join(basepath, 'template/pac'), 'rb') as f:
+            pac = f.read().replace(b'{{port}}', str(setting.config['server']['port']).encode('iso-8859-1'))
+        self.wfile.write(f'HTTP/1.1 200 OK\r\nContent-Type: application/x-ns-proxy-autoconfig\r\nContent-Length: {len(pac)}\r\n\r\n'.encode('iso-8859-1'))
+        self.wfile.write(pac)
+        return True
     
     def http_redirect(self, path):
         ishttp = False
@@ -79,7 +84,7 @@ class ProxyHandler(StreamRequestHandler):
             if not ishttp:
                 return False
         logger.debug('Redirect to '+path)
-        self.wfile.write(REDIRECT_HEADER.format(path).encode('iso-8859-1'))
+        self.wfile.write(f'HTTP/1.1 301 Moved Permanently\r\nLocation: https://{path}\r\n\r\n'.encode('iso-8859-1'))
         return True
     
     def parse_host(self, forward=False):
@@ -107,6 +112,8 @@ class ProxyHandler(StreamRequestHandler):
                         self.remote_ip = DNSquery(host)
                         logger.debug(f'DNS: {self.host} -> {self.remote_ip}')
                 if 'GET' == command:
+                    if path.startswith('/pac/'):
+                        return not self.send_pac()
                     self.http_redirect(path)
             elif 'POST' == command:
                     content_lenght = 0
@@ -225,22 +232,14 @@ class ProxyHandler(StreamRequestHandler):
         self.remote_sock.sendall(self.raw_request)
         self.forward(self.request, self.remote_sock, self.host in setting.config['content_fix'])
 
-class Proxy():
-    def __init__(self):
-        if hasattr(subprocess, 'STARTUPINFO'):
-            self.si = subprocess.STARTUPINFO()
-            self.si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        else:
-            self.si = None
-    def winrun(self, cmd):
-        subprocess.check_output(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE \
-           , startupinfo=self.si, env=os.environ)
+class Proxy:
     def start(self, address, port):
         try:
             self.server = ThreadingTCPServer((address, int(port)), ProxyHandler)
             logger.info("server started at {}:{}".format(address, port))
             if setting.config['setproxy'] and sys.platform.startswith('win'):
-                self.winrun(os.path.join(basepath, 'sysproxy.exe')+' pac http://localhost:'+str(setting.config['webuiport'])+'/pac/?t='+str(random.randrange(2**16)))
+                from utils import sysproxy
+                sysproxy.set_pac('http://localhost:'+str(setting.config['webuiport'])+'/pac/?t='+str(random.randrange(2**16)))
             self.server.serve_forever()
         except socket.error as e:
             logger.error(e)
